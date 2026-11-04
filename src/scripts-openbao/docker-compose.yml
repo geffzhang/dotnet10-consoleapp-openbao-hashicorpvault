@@ -2,10 +2,60 @@
 # OpenBao UI: https://openbao.org/docs/configuration/ui/
 services:
   openbao:
-    image: openbao/openbao
+    image: ghcr.io/openbao/openbao:2.7.2
+    command: ["bao", "server", "-config=/openbao/config/openbao.hcl"]
+    restart: unless-stopped
     ports:
-      - "1337:1337"
+      - "127.0.0.1:1337:1337"
     environment:
-      BAO_DEV_ROOT_TOKEN_ID: "1f91d80e-0a03-49b3-b84b-f1de3d172eec"
-      BAO_DEV_LISTEN_ADDRESS: "0.0.0.0:1337"
-      BAO_LOCAL_CONFIG: '{"ui": true}'
+      BAO_ADDR: "http://127.0.0.1:1337"
+    configs:
+      - source: openbao-config
+        target: /openbao/config/openbao.hcl
+    volumes:
+      - openbao-data:/openbao/file
+    healthcheck:
+      test: ["CMD", "bao", "status"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  openbao-init:
+    image: ghcr.io/openbao/openbao:2.7.2
+    profiles: ["init"]
+    depends_on:
+      openbao:
+        condition: service_healthy
+    environment:
+      BAO_ADDR: "http://openbao:1337"
+      BAO_TOKEN: "${BAO_TOKEN:-}"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        : "$${BAO_TOKEN:?Set BAO_TOKEN before initializing test secrets}"
+        bao kv put -mount=secret app/config username=admin password='P@ssw0rd123'
+        bao kv put -mount=secret integracoes/api api_key=abc123456789 endpoint=https://api.exemplo.com
+        echo "Test secrets initialized successfully."
+
+configs:
+  openbao-config:
+    content: |
+      ui = true
+      disable_mlock = true
+      api_addr = "http://openbao:1337"
+      cluster_addr = "https://openbao:1338"
+
+      storage "raft" {
+        path = "/openbao/file"
+        node_id = "openbao-1"
+      }
+
+      listener "tcp" {
+        address = "0.0.0.0:1337"
+        cluster_address = "0.0.0.0:1338"
+        tls_disable = true
+      }
+
+volumes:
+  openbao-data:

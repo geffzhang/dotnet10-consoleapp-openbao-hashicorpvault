@@ -2,13 +2,13 @@
 # https://openbao.org/api-docs/secret/kv/kv-v2/#configure-the-kv-engine
 
 @BASE_ADDRESS=http://localhost:1337/v1
-@VAULT_TOKEN=1f91d80e-0a03-49b3-b84b-f1de3d172eec
+@VAULT_TOKEN={{$processEnv BAO_TOKEN}}
 
 ###
 
 # Verificando se o serviço está ativo e saudável
 curl \
-  --header "X-Vault-Token: {{VAULT_TOKEN}}X" \
+  --header "X-Vault-Token: {{VAULT_TOKEN}}" \
   {{BASE_ADDRESS}}/sys/health
 
 ###
