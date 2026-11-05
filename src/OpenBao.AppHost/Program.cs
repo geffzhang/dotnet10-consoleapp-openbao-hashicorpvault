@@ -13,7 +13,10 @@ internal static class OpenBaoAppHost
         var mode = ParseMode(builder.Configuration["OpenBao:Mode"]);
         var token = mode == OpenBaoMode.Development
             ? builder.AddParameter("openbao-token", secret: true)
-            : builder.AddParameter("openbao-token", string.Empty, secret: true);
+            : builder.AddParameter(
+                "openbao-token",
+                () => builder.Configuration["Parameters:openbao-token"] ?? string.Empty,
+                secret: true);
         var openBao = builder.AddOpenBao("openbao", mode, token.Resource);
         var console = builder.AddProject<Projects.ConsoleAppTestsVaultSharp>("console")
             .WithReference(openBao);

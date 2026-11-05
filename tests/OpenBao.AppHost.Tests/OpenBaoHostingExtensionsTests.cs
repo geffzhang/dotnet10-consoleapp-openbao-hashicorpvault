@@ -28,6 +28,22 @@ public sealed class OpenBaoHostingExtensionsTests
         var connectionString = Assert.IsType<ConnectionStringReference>(
             environment["ConnectionStrings__openbao"]);
         Assert.Same(openBao, connectionString.Resource);
+        Assert.True(openBao.TokenParameter.Secret);
+        Assert.Equal(string.Empty, await openBao.TokenParameter.GetValueAsync(CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task PersistentModeUsesConfiguredSecretToken()
+    {
+        const string tokenValue = "synthetic-persistent-token";
+        var application = DistributedApplication.CreateBuilder([]);
+        application.Configuration["Parameters:openbao-token"] = tokenValue;
+
+        OpenBaoAppHost.Configure(application);
+
+        var openBao = Assert.Single(application.Resources.OfType<OpenBaoResource>());
+
+        Assert.Equal(tokenValue, await openBao.TokenParameter.GetValueAsync(CancellationToken.None));
     }
 
     [Fact]
