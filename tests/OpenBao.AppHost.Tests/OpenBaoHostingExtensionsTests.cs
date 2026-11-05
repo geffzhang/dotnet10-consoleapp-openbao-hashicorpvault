@@ -7,6 +7,93 @@ namespace OpenBao.AppHost.Tests;
 public sealed class OpenBaoHostingExtensionsTests
 {
     [Fact]
+    public async Task PersistentConsoleIsExplicitAndNoSeederIsCreated()
+    {
+        var application = DistributedApplication.CreateBuilder([]);
+
+        OpenBaoAppHost.Configure(application);
+
+        var openBao = Assert.Single(application.Resources.OfType<OpenBaoResource>());
+        var console = Assert.Single(
+            application.Resources.OfType<ProjectResource>(),
+            resource => resource.Name == "console");
+
+        Assert.NotEmpty(console.Annotations.OfType<ExplicitStartupAnnotation>());
+        Assert.Contains(
+            console.Annotations.OfType<WaitAnnotation>(),
+            annotation => ReferenceEquals(annotation.Resource, openBao));
+        Assert.DoesNotContain(application.Resources, resource => resource.Name == "openbao-seed");
+
+        var environment = await EvaluateEnvironmentAsync(application, console);
+        var connectionString = Assert.IsType<ConnectionStringReference>(
+            environment["ConnectionStrings__openbao"]);
+        Assert.Same(openBao, connectionString.Resource);
+    }
+
+    [Fact]
+    public void ConfigureRejectsUnsupportedMode()
+    {
+        var application = DistributedApplication.CreateBuilder([]);
+        application.Configuration["OpenBao:Mode"] = "Unsupported";
+
+        Assert.Throws<InvalidOperationException>(() => OpenBaoAppHost.Configure(application));
+    }
+
+    [Fact]
+    public async Task DevelopmentConsoleWaitsForSeederCompletion()
+    {
+        const string tokenValue = "synthetic-development-token";
+        var application = DistributedApplication.CreateBuilder([]);
+        application.Configuration["OpenBao:Mode"] = "Development";
+        application.Configuration["Parameters:openbao-token"] = tokenValue;
+
+        OpenBaoAppHost.Configure(application);
+
+        var openBao = Assert.Single(application.Resources.OfType<OpenBaoResource>());
+        var token = Assert.Single(
+            application.Resources.OfType<ParameterResource>(),
+            parameter => parameter.Name == "openbao-token");
+        var console = Assert.Single(
+            application.Resources.OfType<ProjectResource>(),
+            resource => resource.Name == "console");
+        var seeder = Assert.Single(
+            application.Resources.OfType<ProjectResource>(),
+            resource => resource.Name == "openbao-seed");
+
+        Assert.True(token.Secret);
+        Assert.Contains(
+            console.Annotations.OfType<WaitAnnotation>(),
+            annotation => ReferenceEquals(annotation.Resource, seeder) &&
+                annotation.WaitType == WaitType.WaitForCompletion);
+        Assert.Contains(
+            seeder.Annotations.OfType<WaitAnnotation>(),
+            annotation => ReferenceEquals(annotation.Resource, openBao));
+
+        var openBaoEnvironment = await EvaluateEnvironmentAsync(application, openBao);
+        var tokenExpression = Assert.IsType<ReferenceExpression>(
+            openBaoEnvironment["BAO_DEV_ROOT_TOKEN_ID"]);
+        Assert.Contains(token, GetReferencedObjects(tokenExpression));
+        Assert.DoesNotContain(tokenValue, tokenExpression.ValueExpression);
+
+        var consoleEnvironment = await EvaluateEnvironmentAsync(application, console);
+        var consoleConnection = Assert.IsType<ConnectionStringReference>(
+            consoleEnvironment["ConnectionStrings__openbao"]);
+        var seederEnvironment = await EvaluateEnvironmentAsync(application, seeder);
+        var seederConnection = Assert.IsType<ConnectionStringReference>(
+            seederEnvironment["ConnectionStrings__openbao"]);
+
+        Assert.Same(openBao, consoleConnection.Resource);
+        Assert.Same(openBao, seederConnection.Resource);
+        Assert.Contains(token, GetReferencedObjects(openBao.ConnectionStringExpression));
+        Assert.DoesNotContain(
+            tokenValue,
+            ((IManifestExpressionProvider)consoleConnection).ValueExpression);
+        Assert.DoesNotContain(
+            tokenValue,
+            ((IManifestExpressionProvider)seederConnection).ValueExpression);
+    }
+
+    [Fact]
     public async Task PersistentModeUsesPostgresNamedVolumeAndWaitsForDatabase()
     {
         var application = DistributedApplication.CreateBuilder([]);
@@ -85,5 +172,24 @@ public sealed class OpenBaoHostingExtensionsTests
                 }
             }
         }
+    }
+
+    private static async Task<Dictionary<string, object>> EvaluateEnvironmentAsync(
+        IDistributedApplicationBuilder application,
+        IResource resource)
+    {
+        var variables = new Dictionary<string, object>(StringComparer.Ordinal);
+        var context = new EnvironmentCallbackContext(
+            application.ExecutionContext,
+            resource,
+            variables,
+            CancellationToken.None);
+
+        foreach (var annotation in resource.Annotations.OfType<EnvironmentCallbackAnnotation>())
+        {
+            await annotation.Callback(context);
+        }
+
+        return variables;
     }
 }

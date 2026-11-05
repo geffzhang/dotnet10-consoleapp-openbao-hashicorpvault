@@ -1,0 +1,18 @@
+{
+  "profiles": {
+    "persistent": {
+      "commandName": "Project",
+      "launchBrowser": false,
+      "environmentVariables": {
+        "OpenBao__Mode": "Persistent"
+      }
+    },
+    "development": {
+      "commandName": "Project",
+      "launchBrowser": false,
+      "environmentVariables": {
+        "OpenBao__Mode": "Development"
+      }
+    }
+  }
+}

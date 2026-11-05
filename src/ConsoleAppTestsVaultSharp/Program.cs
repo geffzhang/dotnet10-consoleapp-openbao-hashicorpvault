@@ -5,7 +5,17 @@ using VaultSharp.V1.AuthMethods;
 using VaultSharp.V1.AuthMethods.Token;
 using VaultSharp.V1.Commons;
 
-Console.WriteLine("*** .NET 10 + HashiCorp Vault/OpenBao + VaultSharp（NuGet 包）测试 ***");
+if (args.Length > 0 && (args.Length != 1 || args[0] != "--seed-demo-data"))
+{
+    Console.Error.WriteLine("只支持无参数运行或 --seed-demo-data。");
+    return 2;
+}
+
+var seedDemoData = args.Length == 1;
+if (!seedDemoData)
+{
+    Console.WriteLine("*** .NET 10 + HashiCorp Vault/OpenBao + VaultSharp（NuGet 包）测试 ***");
+}
 
 var configuration = new ConfigurationManager();
 configuration.AddEnvironmentVariables();
@@ -15,6 +25,28 @@ IAuthMethodInfo authMethod = new TokenAuthMethodInfo(connectionSettings.Token);
 
 var vaultClientSettings = new VaultClientSettings(connectionSettings.Address.ToString(), authMethod);
 IVaultClient vaultClient = new VaultClient(vaultClientSettings);
+
+if (seedDemoData)
+{
+    try
+    {
+        await OpenBaoDemoSeeder.SeedAsync(async (path, data) =>
+        {
+            await vaultClient.V1.Secrets.KeyValue.V2.WriteSecretAsync(
+                path,
+                data,
+                mountPoint: "secret");
+        });
+
+        Console.WriteLine("演示 Secret 写入完成。");
+        return 0;
+    }
+    catch (Exception exception)
+    {
+        Console.Error.WriteLine($"演示 Secret 写入失败（{exception.GetType().Name}）。");
+        return 1;
+    }
+}
 
 Console.WriteLine("");
 Console.WriteLine("正在读取第一组 Secret：app/config...");
@@ -49,3 +81,5 @@ if (!Console.IsInputRedirected)
     Console.WriteLine("按回车键退出...");
     Console.ReadLine();
 }
+
+return 0;
