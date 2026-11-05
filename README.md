@@ -8,7 +8,7 @@
 |---|---|
 | [Program.cs](src/ConsoleAppTestsVaultSharp/Program.cs) | 使用 Token 认证读取 KV v2 Secret，也支持显式演示数据写入 |
 | [ConsoleAppTestsVaultSharp.csproj](src/ConsoleAppTestsVaultSharp/ConsoleAppTestsVaultSharp.csproj) | .NET 10 控制台项目，引用 VaultSharp 1.17.5.1 |
-| [OpenBao.AppHost.csproj](src/OpenBao.AppHost/OpenBao.AppHost.csproj) | Aspire 13.4.6 / .NET 10 双模式 AppHost 项目 |
+| [OpenBao.AppHost.csproj](src/OpenBao.AppHost/OpenBao.AppHost.csproj) | Aspire 13.6.4 / .NET 10 双模式 AppHost 项目 |
 | [OpenBaoResource.cs](src/OpenBao.AppHost/Hosting/OpenBaoResource.cs) | 实现 OpenBao 容器资源及连接字符串资源契约 |
 | [OpenBao.AppHost.Tests.csproj](tests/OpenBao.AppHost.Tests/OpenBao.AppHost.Tests.csproj) | 不启动容器的 Aspire 资源模型测试 |
 | [ConsoleAppTestsVaultSharp.Tests.csproj](tests/ConsoleAppTestsVaultSharp.Tests/ConsoleAppTestsVaultSharp.Tests.csproj) | 控制台配置解析和演示数据写入测试 |
