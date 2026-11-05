@@ -1,139 +1,106 @@
-# Aspire orchestration for OpenBao
+# 使用 Aspire 编排 OpenBao
 
-## Goal and scope
+## 目标与范围
 
-Add an Aspire AppHost that orchestrates OpenBao and the existing .NET 10
-VaultSharp console application. Follow the container, endpoint injection, and
-dependency patterns in the supplied BellaBaxter.Aspire.Host reference without
-depending on the Bella Baxter stack.
+新增 Aspire AppHost，编排 OpenBao 和现有的 .NET 10 VaultSharp 控制台应用。
+参考用户提供的 BellaBaxter.Aspire.Host 中的容器编排、端点注入和依赖管理方式，
+但不依赖 Bella Baxter 的整套服务。
 
-OpenBao is pinned to `ghcr.io/openbao/openbao:2.7.2` in both modes.
-The user approved two modes: PostgreSQL-backed persistent storage by default,
-and an explicitly selected in-memory development server.
+两种模式均固定使用 `ghcr.io/openbao/openbao:2.7.2`。
+用户已确认支持两种模式：默认使用 PostgreSQL 后端的持久化模式，以及显式选择的内存开发模式。
 
-This is a local learning and demonstration setup, not a production deployment.
-Existing Docker Compose behavior and existing Raft data remain unchanged.
+本方案面向本地学习和演示，不作为生产部署方案。
+现有 Docker Compose 的行为及已有 Raft 数据保持不变。
 
-## Approach
+## 实现方式
 
-Use one AppHost project with two launch profiles and small, local hosting
-extensions only where needed. Do not introduce a separate integration library.
-Add the AppHost to the existing solution.
+使用一个 AppHost 项目，通过两个启动配置选择模式；仅在需要时提取项目内的小型编排扩展。
+不新增独立的集成类库，将 AppHost 加入现有解决方案。
 
-Direct Aspire container orchestration is preferred over wrapping Compose because
-the AppHost must own resource dependencies and inject resolved endpoints.
-A reusable hosting package would add unnecessary project and API overhead here.
+优先使用 Aspire 直接编排容器，而不是包装 Compose，以便由 AppHost 管理资源依赖并注入实际端点。
+当前仓库规模不需要额外的可复用集成包及其公共 API。
 
-## Persistent profile
+## 持久化模式
 
-- Start PostgreSQL with a named data volume and a dedicated OpenBao database.
-- Start OpenBao only after the database is ready.
-- Configure OpenBao's `postgresql` storage backend. Allow OpenBao to create its
-  storage tables; do not introduce a separate schema migration service.
-- Supply database credentials through secret parameters and runtime environment
-  variables, not through checked-in connection strings or configuration files.
-  Use the PostgreSQL environment variables supported by OpenBao's backend.
-- Disable database TLS only for this local container network. Document that
-  production deployments need TLS and appropriate database permissions.
-- Enable the OpenBao UI and an HTTP API endpoint. Resolve the host-facing
-  endpoint through Aspire rather than assuming a fixed port in the console.
-- Keep server initialization and unsealing manual. Do not capture or store
-  unseal keys or root tokens in project files or automatic initialization logs.
-- Treat uninitialized and sealed states as not ready. Start the console only
-  after OpenBao's readiness check succeeds.
-- Never seed or overwrite persistent secrets automatically. Document explicit
-  KV v2 enablement and the existing two demonstration secret paths.
-- Store secret data in PostgreSQL's volume. An OpenBao restart requires
-  unsealing, but must preserve secrets and their versions.
+- 启动 PostgreSQL，使用命名数据卷，并为 OpenBao 创建专用数据库。
+- 数据库就绪后才启动 OpenBao。
+- 配置 OpenBao 的 `postgresql` 存储后端，允许其自动创建存储表，不引入独立的数据库迁移服务。
+- 数据库凭据通过机密参数和运行时环境变量传递，不写入受版本控制的连接字符串或配置文件。
+  使用 OpenBao 后端支持的 PostgreSQL 环境变量。
+- 仅在本地容器网络中禁用数据库 TLS；文档说明生产部署需要 TLS 和适当的数据库权限。
+- 启用 OpenBao UI 和 HTTP API，通过 Aspire 解析宿主机访问端点，控制台不假设固定端口。
+- 保持手动初始化和解封，不在项目文件或自动初始化日志中采集、保存解封密钥及 Root Token。
+- 未初始化或已密封状态视为未就绪；OpenBao 就绪检查通过后，控制台才允许启动。
+- 不自动写入或覆盖持久化 Secret；文档说明如何显式启用 KV v2，并写入现有两组演示数据。
+- Secret 数据存储在 PostgreSQL 数据卷中。重启 OpenBao 后需要重新解封，但 Secret 及其版本必须保留。
 
-On the first run, start infrastructure without requiring a usable console token.
-The console must be startable explicitly after initialization, unsealing, KV v2
-setup, and token configuration. Document any necessary AppHost restart to load
-new environment variables or user secrets. Missing credentials must not prevent
-the user from starting the infrastructure needed to obtain them.
+首次运行时，即使尚无可供控制台使用的 Token，也必须能够启动基础设施。
+完成初始化、解封、KV v2 配置及 Token 设置后，用户应能显式启动控制台。
+若加载新的环境变量或用户机密需要重启 AppHost，应在文档中说明。
+不能因为缺少凭据而阻止用户启动用于获取这些凭据的基础设施。
 
-## Development profile
+## 开发模式
 
-- Run OpenBao with `server -dev`; PostgreSQL is not needed in this profile.
-- Supply a development root token through an Aspire secret parameter rather
-  than a source-code literal. The same parameter authenticates the seed
-  operation and the console.
-- Wait for OpenBao readiness before writing the existing demonstration secrets:
-  `secret/app/config` and `secret/integracoes/api`.
-- Reuse the current demonstration fields and values. Clearly label them as
-  public demonstration data, never real credentials.
-- Start the console only after successful seeding. A failed seed operation
-  must be visible and must not be reported as success.
-- Document that secrets disappear on restart and that the development server
-  is unsuitable for production.
+- 使用 `server -dev` 启动 OpenBao，此模式不启动 PostgreSQL。
+- 通过 Aspire 机密参数提供开发用 Root Token，不在源码中硬编码。
+  数据写入操作和控制台使用同一个参数进行认证。
+- 等待 OpenBao 就绪后，写入现有两组演示 Secret：
+  `secret/app/config` 和 `secret/integracoes/api`。
+- 沿用现有演示字段和值，并明确标注为公开演示数据，不作为真实凭据使用。
+- 演示数据写入成功后才启动控制台；写入失败必须明确显示，不能被报告为成功。
+- 文档明确说明重启会丢失 Secret，开发模式不适用于生产环境。
 
-## Console integration and credentials
+## 控制台集成与凭据
 
-Keep the current Token authentication, KV v2 paths, Chinese messages, and
-standalone execution behavior.
+保留现有 Token 认证、KV v2 路径、中文提示和独立运行方式。
 
-- Continue reading the token from `BAO_TOKEN`.
-- Read the server URI from `BAO_ADDR` when supplied by Aspire.
-- Use `http://localhost:1337` only when `BAO_ADDR` is absent, preserving the
-  existing standalone default.
-- Reject explicitly configured empty or invalid addresses with a clear error.
-- Inject the resolved OpenBao endpoint and token into the console through
-  Aspire environment configuration.
-- Support explicit console startup in persistent mode; automated startup in
-  development mode must not depend on interactive terminal input.
-- Preserve the standalone press-Enter exit behavior and avoid waiting for input
-  when the console is launched noninteractively.
+- 继续通过 `BAO_TOKEN` 读取 Token。
+- 支持通过 Aspire 注入的 `BAO_ADDR` 读取服务地址。
+- 仅在未设置 `BAO_ADDR` 时使用 `http://localhost:1337`，保留独立运行的默认行为。
+- 对显式配置为空或格式无效的地址给出明确错误。
+- 通过 Aspire 环境配置向控制台注入实际 OpenBao 端点和 Token。
+- 持久化模式支持显式启动控制台；开发模式的自动启动流程不依赖交互式终端输入。
+- 独立交互运行时保留“按回车退出”的行为，非交互启动时不等待输入。
 
-Use Aspire secret parameters and user secrets for sensitive inputs. Never commit
-tokens, database passwords, unseal keys, or local credential files. Do not add
-custom logging of credentials. Document the existing console's intentional
-plaintext output of demonstration secrets and the development server's unsafe
-logging characteristics.
+敏感输入使用 Aspire 机密参数和用户机密管理，不提交 Token、数据库密码、解封密钥或本地凭据文件。
+不新增输出凭据的自定义日志。
+文档说明现有控制台会有意明文输出演示 Secret，以及开发服务器本身存在不安全的日志输出特征。
 
-## Compatibility and operational boundaries
+## 兼容性与操作边界
 
-- Keep the existing Compose file as an independent Raft-backed workflow.
-- Do not share its data volume or automatically migrate its data into PostgreSQL.
-- Explain the difference between selecting a profile and migrating stored data.
-- Preserve the current console project and its direct `dotnet run` workflow.
-- Keep all API and database exposure local to the development machine; do not
-  publish externally accessible endpoints.
-- Do not add HA, automatic unsealing, production TLS, backup automation, or
-  unrelated Bella Baxter services.
+- 保留现有 Compose 文件，作为独立的 Raft 存储运行方式。
+- 不复用其数据卷，不自动将其数据迁移到 PostgreSQL。
+- 明确说明切换启动配置不等于迁移已有数据。
+- 保留现有控制台项目及直接使用 `dotnet run` 的工作流。
+- API 和数据库端点仅供本机开发访问，不向外部网络公开。
+- 不引入高可用、自动解封、生产 TLS、自动备份或无关的 Bella Baxter 服务。
 
-## Documentation
+## 文档更新
 
-Update the root README with prerequisites, solution/AppHost commands, both
-profiles, parameter setup, resolved endpoint discovery, manual initialization
-and unsealing, explicit demonstration seeding, console startup, and persistence
-semantics. Explain that ordinary resource shutdown must not delete database
-volumes and that removing volumes destroys stored data.
+更新仓库根目录 README，补充环境要求、解决方案及 AppHost 命令、两种启动配置、
+参数设置、实际端点查看方式、手动初始化与解封、显式写入演示数据、控制台启动方式和持久化行为。
+说明普通停止操作不应删除数据库卷，删除数据卷会销毁其中的数据。
 
-## Verification and acceptance
+## 验证与验收
 
-1. Build the AppHost and existing console through the solution.
-2. Verify both orchestration models: pinned image, profile-specific resources,
-   named PostgreSQL volume, secret parameter references, endpoint injection,
-   readiness dependencies, and seed completion dependencies.
-3. Verify `BAO_ADDR` default, configured address, invalid address, and missing
-   token behavior without contacting a real secrets service where possible.
-4. With Docker available, run development mode and verify both secret paths and
-   console completion.
-5. With Docker available, initialize and unseal a disposable PostgreSQL-backed
-   instance, enable KV v2, write and read test secrets, then restart OpenBao and
-   verify that data remains after unsealing.
-6. Confirm persistent startup never seeds or overwrites secrets automatically.
-7. Leave existing Compose resources and user data untouched. Clean up only
-   resources created for these checks.
+1. 通过解决方案构建 AppHost 和现有控制台。
+2. 验证两种编排模型中的镜像版本、模式专属资源、PostgreSQL 命名卷、机密参数引用、
+   端点注入、就绪依赖和演示数据写入完成依赖。
+3. 尽可能在不连接真实机密服务的情况下，验证 `BAO_ADDR` 的默认地址、配置地址、
+   无效地址以及缺少 Token 时的行为。
+4. Docker 可用时，运行开发模式，验证两组 Secret 均可读取，且控制台正常完成。
+5. Docker 可用时，创建临时 PostgreSQL 后端实例，初始化并解封，启用 KV v2，
+   写入和回读测试 Secret；重启 OpenBao 并重新解封后，再次确认数据仍然存在。
+6. 确认持久化模式启动时不会自动写入或覆盖 Secret。
+7. 不改动已有 Compose 资源和用户数据，仅清理为验证而创建的资源。
 
-If Docker or another required runtime is unavailable, report the blocked runtime
-checks explicitly; a successful build alone does not establish persistence.
+如果 Docker 或其他必要运行环境不可用，必须明确说明哪些运行验证受阻；
+仅构建成功不能证明数据持久化正确。
 
-## References
+## 参考资料
 
-- Supplied local reference: `BellaBaxter.Aspire.Host` in the
-  `bella-baxter-dotnet` repository.
-- [OpenBao PostgreSQL storage](https://openbao.org/docs/configuration/storage/postgresql/):
-  backend environment variables and automatic table creation.
-- [OpenBao development server](https://openbao.org/docs/concepts/dev-server/):
-  automatic initialization/unsealing and nonpersistent in-memory storage.
+- 用户提供的本地参考：`bella-baxter-dotnet` 仓库中的 `BellaBaxter.Aspire.Host`。
+- [OpenBao PostgreSQL 存储后端](https://openbao.org/docs/configuration/storage/postgresql/)：
+  后端环境变量和自动建表行为。
+- [OpenBao 开发服务器](https://openbao.org/docs/concepts/dev-server/)：
+  自动初始化、自动解封及非持久化的内存存储。
