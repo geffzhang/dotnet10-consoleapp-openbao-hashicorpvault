@@ -1,19 +1,19 @@
-﻿using VaultSharp;
+﻿using ConsoleAppTestsVaultSharp;
+using Microsoft.Extensions.Configuration;
+using VaultSharp;
 using VaultSharp.V1.AuthMethods;
 using VaultSharp.V1.AuthMethods.Token;
 using VaultSharp.V1.Commons;
 
 Console.WriteLine("*** .NET 10 + HashiCorp Vault/OpenBao + VaultSharp（NuGet 包）测试 ***");
 
-string? token = Environment.GetEnvironmentVariable("BAO_TOKEN");
-if (string.IsNullOrWhiteSpace(token))
-{
-    throw new InvalidOperationException("请设置 BAO_TOKEN 环境变量，并使用具有 Secret 读取权限的 Token。");
-}
+var configuration = new ConfigurationManager();
+configuration.AddEnvironmentVariables();
+var connectionSettings = OpenBaoConnectionSettings.Load(configuration);
 
-IAuthMethodInfo authMethod = new TokenAuthMethodInfo(token);
+IAuthMethodInfo authMethod = new TokenAuthMethodInfo(connectionSettings.Token);
 
-var vaultClientSettings = new VaultClientSettings("http://localhost:1337", authMethod);
+var vaultClientSettings = new VaultClientSettings(connectionSettings.Address.ToString(), authMethod);
 IVaultClient vaultClient = new VaultClient(vaultClientSettings);
 
 Console.WriteLine("");
@@ -44,5 +44,8 @@ Console.WriteLine($"api_key = {api_key}");
 Console.WriteLine($"endpoint = {endpoint}");
 
 Console.WriteLine();
-Console.WriteLine("按回车键退出...");
-Console.ReadLine();
+if (!Console.IsInputRedirected)
+{
+    Console.WriteLine("按回车键退出...");
+    Console.ReadLine();
+}
