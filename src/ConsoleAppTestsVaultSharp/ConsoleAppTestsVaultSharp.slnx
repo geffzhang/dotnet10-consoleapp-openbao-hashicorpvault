@@ -1,3 +1,5 @@
 <Solution>
+  <Project Path="../../tests/OpenBao.AppHost.Tests/OpenBao.AppHost.Tests.csproj" />
+  <Project Path="../OpenBao.AppHost/OpenBao.AppHost.csproj" />
   <Project Path="ConsoleAppTestsVaultSharp.csproj" />
 </Solution>

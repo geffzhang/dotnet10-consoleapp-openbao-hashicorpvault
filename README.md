@@ -8,6 +8,9 @@
 |---|---|
 | [Program.cs](src/ConsoleAppTestsVaultSharp/Program.cs) | 使用 Token 认证，读取两组 KV v2 Secret，输出中文提示并等待回车退出 |
 | [ConsoleAppTestsVaultSharp.csproj](src/ConsoleAppTestsVaultSharp/ConsoleAppTestsVaultSharp.csproj) | .NET 10 控制台项目，引用 VaultSharp 1.17.5.1 |
+| [OpenBao.AppHost.csproj](src/OpenBao.AppHost/OpenBao.AppHost.csproj) | Aspire 13.4.6 / .NET 10 AppHost 项目 |
+| [OpenBaoResource.cs](src/OpenBao.AppHost/Hosting/OpenBaoResource.cs) | 实现容器资源及连接字符串资源契约 |
+| [OpenBao.AppHost.Tests.csproj](tests/OpenBao.AppHost.Tests/OpenBao.AppHost.Tests.csproj) | 不启动容器的 Aspire 资源模型测试 |
 | [docker-compose.yml](src/scripts-openbao/docker-compose.yml) | OpenBao 服务、Raft 数据卷、健康检查及测试数据初始化服务 |
 | [tests.http](src/scripts-openbao/tests.http) | 服务健康检查、Secret 列表、写入与读取请求示例 |
 
@@ -200,3 +203,41 @@ $body = $null
 | 权限不足或 Token 无效 | 检查是否误用旧开发 Token，以及新 Token 是否有效、具备相应权限 |
 | 引擎或 Secret 不存在 | 确认 `secret` 为 KV v2，并已加载两组测试数据 |
 | 重启后无法读取 | 先手动解封，不要重新初始化或删除数据卷 |
+
+## Aspire OpenBaoResource 资源契约
+
+仓库还包含一个 Aspire AppHost 项目和 `OpenBaoResource` 资源类型。该类型继承
+`ContainerResource` 并实现 `IResourceWithConnectionString`；构造函数接收资源名和
+机密 `ParameterResource`。Token 必须使用机密参数，不能作为普通配置或硬编码字符串传入。
+资源通过名为 `http` 的 `EndpointReference` 暴露地址；创建资源模型时，调用方负责添加
+HTTP 端点注解。
+
+下面仅展示资源模型和标准引用契约，不是可直接启动 OpenBao 的完整配置：
+
+```csharp
+using Aspire.Hosting;
+using Aspire.Hosting.ApplicationModel;
+
+var builder = DistributedApplication.CreateBuilder(args);
+var token = builder.AddParameter("openbao-token", secret: true);
+
+var openbao = builder.AddResource(
+        new OpenBaoResource("openbao", token.Resource))
+    .WithHttpEndpoint(targetPort: 8200, name: "http");
+
+var consumer = builder.AddResource(new ContainerResource("consumer"))
+    .WithReference(openbao)
+    .WaitFor(openbao);
+```
+
+`WithReference(openbao)` 按 Aspire 默认命名规则向消费者注入
+`ConnectionStrings__openbao`，连接字符串包含 `Address` 和 `Token` 字段，并保留由 Aspire
+分配且适用于消费者网络的 HTTP 端点地址。Token 以机密参数引用延迟求值，连接字符串字段按
+标准连接字符串规则转义。不同资源名使用各自的默认连接字符串键。
+
+`WithReference` 负责传递连接配置，不代表资源已就绪；需要就绪依赖时应另外调用
+`WaitFor(openbao)`。引用本身不会启动或初始化 OpenBao，也不会解封、写入 Secret 或配置存储。
+
+此阶段只实现并测试资源模型契约，**尚未实现** PostgreSQL 持久化、内存开发模式、
+完整 `AddOpenBao` 扩展、自动启动配置、初始化/解封流程或演示 Secret 写入。
+测试只验证 Aspire 模型与环境变量引用，不代表 OpenBao 容器运行或 PostgreSQL 数据持久化已验证。
