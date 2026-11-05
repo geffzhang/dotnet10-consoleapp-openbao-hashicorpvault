@@ -6,11 +6,12 @@
 
 | 文件 | 用途 |
 |---|---|
-| [Program.cs](src/ConsoleAppTestsVaultSharp/Program.cs) | 使用 Token 认证，读取两组 KV v2 Secret，输出中文提示并等待回车退出 |
+| [Program.cs](src/ConsoleAppTestsVaultSharp/Program.cs) | 使用 Token 认证读取 KV v2 Secret，也支持显式演示数据写入 |
 | [ConsoleAppTestsVaultSharp.csproj](src/ConsoleAppTestsVaultSharp/ConsoleAppTestsVaultSharp.csproj) | .NET 10 控制台项目，引用 VaultSharp 1.17.5.1 |
-| [OpenBao.AppHost.csproj](src/OpenBao.AppHost/OpenBao.AppHost.csproj) | Aspire 13.4.6 / .NET 10 AppHost 项目 |
-| [OpenBaoResource.cs](src/OpenBao.AppHost/Hosting/OpenBaoResource.cs) | 实现容器资源及连接字符串资源契约 |
+| [OpenBao.AppHost.csproj](src/OpenBao.AppHost/OpenBao.AppHost.csproj) | Aspire 13.4.6 / .NET 10 双模式 AppHost 项目 |
+| [OpenBaoResource.cs](src/OpenBao.AppHost/Hosting/OpenBaoResource.cs) | 实现 OpenBao 容器资源及连接字符串资源契约 |
 | [OpenBao.AppHost.Tests.csproj](tests/OpenBao.AppHost.Tests/OpenBao.AppHost.Tests.csproj) | 不启动容器的 Aspire 资源模型测试 |
+| [ConsoleAppTestsVaultSharp.Tests.csproj](tests/ConsoleAppTestsVaultSharp.Tests/ConsoleAppTestsVaultSharp.Tests.csproj) | 控制台配置解析和演示数据写入测试 |
 | [docker-compose.yml](src/scripts-openbao/docker-compose.yml) | OpenBao 服务、Raft 数据卷、健康检查及测试数据初始化服务 |
 | [tests.http](src/scripts-openbao/tests.http) | 服务健康检查、Secret 列表、写入与读取请求示例 |
 
@@ -204,40 +205,89 @@ $body = $null
 | 引擎或 Secret 不存在 | 确认 `secret` 为 KV v2，并已加载两组测试数据 |
 | 重启后无法读取 | 先手动解封，不要重新初始化或删除数据卷 |
 
-## Aspire OpenBaoResource 资源契约
+## Aspire 双模式编排
 
-仓库还包含一个 Aspire AppHost 项目和 `OpenBaoResource` 资源类型。该类型继承
-`ContainerResource` 并实现 `IResourceWithConnectionString`；构造函数接收资源名和
-机密 `ParameterResource`。Token 必须使用机密参数，不能作为普通配置或硬编码字符串传入。
-资源通过名为 `http` 的 `EndpointReference` 暴露地址；创建资源模型时，调用方负责添加
-HTTP 端点注解。
+在仓库根目录运行 AppHost。未配置 `OpenBao:Mode` 时默认使用 `Persistent`；也可使用下列启动配置显式选择模式：
 
-下面仅展示资源模型和标准引用契约，不是可直接启动 OpenBao 的完整配置：
-
-```csharp
-using Aspire.Hosting;
-using Aspire.Hosting.ApplicationModel;
-
-var builder = DistributedApplication.CreateBuilder(args);
-var token = builder.AddParameter("openbao-token", secret: true);
-
-var openbao = builder.AddResource(
-        new OpenBaoResource("openbao", token.Resource))
-    .WithHttpEndpoint(targetPort: 8200, name: "http");
-
-var consumer = builder.AddResource(new ContainerResource("consumer"))
-    .WithReference(openbao)
-    .WaitFor(openbao);
+```powershell
+dotnet run --project .\src\OpenBao.AppHost\OpenBao.AppHost.csproj --launch-profile persistent
+dotnet run --project .\src\OpenBao.AppHost\OpenBao.AppHost.csproj --launch-profile development
 ```
 
-`WithReference(openbao)` 按 Aspire 默认命名规则向消费者注入
-`ConnectionStrings__openbao`，连接字符串包含 `Address` 和 `Token` 字段，并保留由 Aspire
-分配且适用于消费者网络的 HTTP 端点地址。Token 以机密参数引用延迟求值，连接字符串字段按
-标准连接字符串规则转义。不同资源名使用各自的默认连接字符串键。
+| 模式 | 存储与启动行为 | 用途 |
+|---|---|---|
+| `Persistent`（默认） | OpenBao 使用独立 PostgreSQL 数据库和 `openbao-postgres-data` 命名卷。控制台设为显式启动，不会自动初始化、解封或写入 Secret。 | 本地持久化测试 |
+| `Development` | OpenBao 使用内存开发服务器；`openbao-seed` 先写入两组演示 Secret，成功退出后才启动控制台。 | 可丢弃的本地演示 |
 
-`WithReference` 负责传递连接配置，不代表资源已就绪；需要就绪依赖时应另外调用
-`WaitFor(openbao)`。引用本身不会启动或初始化 OpenBao，也不会解封、写入 Secret 或配置存储。
+Development 模式必须提供机密 Aspire 参数 `openbao-token`，它同时作为开发服务器 Root Token、种子服务和控制台的连接 Token。可在当前 PowerShell 进程中安全输入一个仅供本地使用的合成值：
 
-此阶段只实现并测试资源模型契约，**尚未实现** PostgreSQL 持久化、内存开发模式、
-完整 `AddOpenBao` 扩展、自动启动配置、初始化/解封流程或演示 Secret 写入。
-测试只验证 Aspire 模型与环境变量引用，不代表 OpenBao 容器运行或 PostgreSQL 数据持久化已验证。
+```powershell
+$secureToken = Read-Host "请输入本地开发 Token" -AsSecureString
+$tokenValue = [pscredential]::new("openbao", $secureToken).GetNetworkCredential().Password
+[Environment]::SetEnvironmentVariable("Parameters__openbao-token", $tokenValue, "Process")
+dotnet run --project .\src\OpenBao.AppHost\OpenBao.AppHost.csproj --launch-profile development
+```
+
+完成后清除进程环境变量：
+
+```powershell
+[Environment]::SetEnvironmentVariable("Parameters__openbao-token", $null, "Process")
+$tokenValue = $null
+$secureToken = $null
+```
+
+`persistent` 启动配置将 `OpenBao__Mode` 设为 `Persistent`；持久化模式的机密 `openbao-token` 参数默认为空，因此可以先启动数据库和 OpenBao。初始化后如需运行控制台，再将 Root Token 设为 `Parameters__openbao-token` 并重新启动 AppHost。PostgreSQL 用户名和密码也是机密 Aspire 参数，不要提交凭据或生成的用户机密文件。
+
+AppHost 会在启动输出中显示 Aspire Dashboard 地址。OpenBao 的容器目标端口是 `8200`，但宿主机端口由 Aspire 动态分配；从 Dashboard 的 `openbao` 资源查看 `http` 端点，不要假定宿主端口固定为 `8200` 或 Compose 使用的 `1337`。
+
+`AddOpenBao` 为两种模式建立同类型的 OpenBao 容器资源和健康检查；持久化模式还创建 PostgreSQL 数据库并令 OpenBao `WaitFor` 数据库。`WithReference(openBao)` 只向消费者注入标准连接字符串，不代表服务已就绪；`WaitFor(openBao)` 才表达健康依赖。开发模式的种子项目等待 OpenBao，控制台使用 `WaitForCompletion(openbao-seed)` 等种子成功后再启动。持久化模式的控制台由用户在初始化并解封服务、准备好 Secret 后从 Dashboard 显式启动。
+
+Console 项目通过标准 `GetConnectionString("openbao")` 读取 `Address` 和 `Token`。独立运行且没有 Aspire 连接字符串时，才使用 `BAO_ADDR`（未设置时为 `http://localhost:1337`）和 `BAO_TOKEN`；显式空值或无效配置会报错，不会静默回退。若 AppHost 分配了动态宿主端口，独立运行时应将 `BAO_ADDR` 设为 Dashboard 显示的地址。
+
+### 持久化模式初始化和数据
+
+首次启动 `persistent` 后，从 `docker ps` 找到 Aspire 创建的 OpenBao 容器（端口映射目标为 `8200/tcp`），在该容器中执行初始化。以下命令会显示初始化凭据，请将输出安全保存在仓库和数据卷之外：
+
+```powershell
+docker ps --format "table {{.ID}}`t{{.Image}}`t{{.Names}}`t{{.Ports}}"
+docker exec -it <OpenBao容器ID> bao operator init -key-shares=5 -key-threshold=3
+```
+
+每次启动或重启后都要手动解封，输入三份不同的密钥；不要再次初始化已经初始化的数据卷：
+
+```powershell
+docker exec -it <OpenBao容器ID> bao operator unseal
+docker exec -it <OpenBao容器ID> bao operator unseal
+docker exec -it <OpenBao容器ID> bao operator unseal
+docker exec -it <OpenBao容器ID> bao status
+```
+
+确认服务已解封后，使用 Root Token 启用 KV v2（仅首次执行；若 `secret` 已存在，先检查其类型和版本）：
+
+```powershell
+$secureToken = Read-Host "请输入 OpenBao Token" -AsSecureString
+$env:BAO_TOKEN = [pscredential]::new("openbao", $secureToken).GetNetworkCredential().Password
+docker exec -e BAO_TOKEN -it <OpenBao容器ID> bao secrets enable -path=secret -version=2 kv
+```
+
+持久化模式不会自动写入或覆盖 Secret。准备好 `secret` KV v2 挂载点后，可显式运行种子命令；为动态端口设置 Dashboard 显示的地址：
+
+```powershell
+$env:BAO_ADDR = "http://localhost:<Dashboard显示的宿主端口>"
+dotnet run --project .\src\ConsoleAppTestsVaultSharp\ConsoleAppTestsVaultSharp.csproj -- --seed-demo-data
+```
+
+种子命令只报告写入成功状态，不显示 Secret 值；失败时返回非零退出码。随后设置 `Parameters__openbao-token` 并重启 AppHost，在 Dashboard 中显式启动 `console`。普通控制台读取会明文输出 Secret，仅使用演示数据。普通停止 AppHost 会保留 PostgreSQL 命名卷；删除该卷会永久销毁其中的数据。持久化数据不等于备份。
+
+若当前 PowerShell 会话中的 `BAO_TOKEN` 是刚才解封后获得的 Root Token，可将它作为本次 AppHost 进程的机密参数。先用 Ctrl+C 停止 AppHost（不要删除卷），然后重新启动；重启后再次手动解封，再从 Dashboard 显式启动 `console`：
+
+```powershell
+[Environment]::SetEnvironmentVariable("Parameters__openbao-token", $env:BAO_TOKEN, "Process")
+dotnet run --project .\src\OpenBao.AppHost\OpenBao.AppHost.csproj --launch-profile persistent
+```
+
+### 数据边界和现有 Compose/Raft 模式
+
+Development 模式的数据只存在内存中，停止或重启会丢失 Secret；开发服务器日志和控制台输出不适合存放敏感数据。此模式仅供本地演示，不应承载真实凭据。
+
+AppHost 的 PostgreSQL 卷 `openbao-postgres-data` 与现有 Docker Compose/Raft 卷 `openbao-data` 完全独立。仓库保留 `src\scripts-openbao\docker-compose.yml` 和现有直接 `dotnet run` 工作流；三种运行方式之间没有自动迁移，也不共享数据卷。迁移 Secret 需要用户显式导出、写入并回读验证。
