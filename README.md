@@ -250,16 +250,16 @@ Console 项目通过标准 `GetConnectionString("openbao")` 读取 `Address` 和
 
 ```powershell
 docker ps --format "table {{.ID}}`t{{.Image}}`t{{.Names}}`t{{.Ports}}"
-docker exec -it <OpenBao容器ID> bao operator init -key-shares=5 -key-threshold=3
+docker exec -e BAO_ADDR=http://127.0.0.1:8200 -it <OpenBao容器ID> bao operator init -key-shares=5 -key-threshold=3
 ```
 
 每次启动或重启后都要手动解封，输入三份不同的密钥；不要再次初始化已经初始化的数据卷：
 
 ```powershell
-docker exec -it <OpenBao容器ID> bao operator unseal
-docker exec -it <OpenBao容器ID> bao operator unseal
-docker exec -it <OpenBao容器ID> bao operator unseal
-docker exec -it <OpenBao容器ID> bao status
+docker exec -e BAO_ADDR=http://127.0.0.1:8200 -it <OpenBao容器ID> bao operator unseal
+docker exec -e BAO_ADDR=http://127.0.0.1:8200 -it <OpenBao容器ID> bao operator unseal
+docker exec -e BAO_ADDR=http://127.0.0.1:8200 -it <OpenBao容器ID> bao operator unseal
+docker exec -e BAO_ADDR=http://127.0.0.1:8200 -it <OpenBao容器ID> bao status
 ```
 
 确认服务已解封后，使用 Root Token 启用 KV v2（仅首次执行；若 `secret` 已存在，先检查其类型和版本）：
@@ -267,7 +267,7 @@ docker exec -it <OpenBao容器ID> bao status
 ```powershell
 $secureToken = Read-Host "请输入 OpenBao Token" -AsSecureString
 $env:BAO_TOKEN = [pscredential]::new("openbao", $secureToken).GetNetworkCredential().Password
-docker exec -e BAO_TOKEN -it <OpenBao容器ID> bao secrets enable -path=secret -version=2 kv
+docker exec -e BAO_TOKEN -e BAO_ADDR=http://127.0.0.1:8200 -it <OpenBao容器ID> bao secrets enable -path=secret -version=2 kv
 ```
 
 持久化模式不会自动写入或覆盖 Secret。准备好 `secret` KV v2 挂载点后，可显式运行种子命令；为动态端口设置 Dashboard 显示的地址：
